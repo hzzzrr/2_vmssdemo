@@ -1,0 +1,132 @@
+#cloud-config 
+# set timezone to Asia/Shanghai
+timezone: Asia/Shanghai
+package_update: true
+package_upgrade: false
+packages:
+  - python3-pip
+  - iptables
+  - iptables-persistent
+  - netfilter-persistent
+  - curl
+  - jq
+  - net-tools
+  - iputils-ping
+  - traceroute
+  - tcpdump
+  - python3-flask
+  - python3-requests
+
+write_files:
+  - path: /usr/local/bin/graceful-shutdown.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] graceful-shutdown.sh: 开始休眠 600 秒" | logger -t graceful-shutdown
+      # remove flag file before sleep so that load balancer can see the instance is not ready
+      rm -f /tmp/health_flag
+      sleep 600
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] graceful-shutdown.sh: 休眠结束，脚本执行完毕" | logger -t graceful-shutdown
+
+  - path: /etc/systemd/system/graceful-shutdown.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Graceful Shutdown Sleep Script
+      DefaultDependencies=no
+      Before=shutdown.target reboot.target halt.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/graceful-shutdown.sh
+      RemainAfterExit=no
+
+      [Install]
+      WantedBy=halt.target reboot.target shutdown.target
+
+  - path: /usr/local/bin/webapp.py
+    owner: root:root
+    permissions: '0755'
+    content: |
+      from flask import Flask, jsonify, Response
+      import socket
+      import os
+      import requests
+      
+      app = Flask(__name__)
+      
+      FLAG_FILE = "/tmp/health_flag"
+    
+      def get_host_info():
+          hostname = socket.gethostname()
+          local_ip = socket.gethostbyname(hostname)
+          return hostname, local_ip
+      
+      @app.route("/")
+      def index():
+          hostname, local_ip = get_host_info()
+          html = f"""
+          <html>
+          <head><title>主机信息</title></head>
+          <body>
+              <h1>主机名: {hostname}</h1>
+              <h2>本地IP: {local_ip}</h2>
+          </body>
+          </html>
+          """
+          return html
+      
+      @app.route("/health")
+      def health():
+          hostname, local_ip = get_host_info()
+          if os.path.exists(FLAG_FILE):
+              return Response(f"OK, hostname: {hostname}, local_ip: {local_ip}", status=200)
+          else:
+              return Response(f"FAIL, hostname: {hostname}, local_ip: {local_ip}", status=400)
+      
+      @app.route("/getpublic")
+      def get_public():
+          hostname, local_ip = get_host_info()
+          try:
+              ip = requests.get("https://ipinfo.io/ip", timeout=3).text.strip()
+              return jsonify({"public_ip": ip, "hostname": hostname, "local_ip": local_ip})
+          except Exception as e:
+              return jsonify({"error": str(e), "hostname": hostname, "local_ip": local_ip}), 500
+      
+      if __name__ == "__main__":
+          app.run(host="0.0.0.0", port=80)
+  
+  - path: /etc/systemd/system/webapp.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Simple Web App
+      After=network.target
+
+      [Service]
+      # create flag before start webapp and remove it during shutdown
+      ExecStartPre=/bin/bash -c "touch /tmp/health_flag"
+      ExecStopPost=/bin/bash -c "rm -f /tmp/health_flag"
+      ExecStart=/usr/bin/python3 /usr/local/bin/webapp.py
+      Restart=always
+      User=root
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - |
+    export DEBIAN_FRONTEND=noninteractive
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+    pip3 install --no-cache-dir flask requests
+    sysctl -w net.ipv4.ip_forward=1
+    iptables -t nat -A PREROUTING -p tcp --dport 5566 -j REDIRECT --to-port 22
+    netfilter-persistent save
+    systemctl daemon-reload
+    systemctl enable graceful-shutdown.service
+    systemctl enable webapp
+    systemctl start webapp
