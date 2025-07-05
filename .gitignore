@@ -1,33 +1,29 @@
 
-# 忽略 Terraform 自动生成的文件夹
+# Ignore everything
+*
+
+# But not these files
+!*.tf
+!*.yaml
+
+# Ignore .terraform directory
 .terraform/
 
-# 忽略 Terraform 状态文件
-*.tfstate
-*.tfstate.*
-
-# 忽略 Terraform 计划文件
-*.tfplan
-
-# 忽略 Terraform 变量文件（如果包含敏感信息）
-*.tfvars
-
-# 忽略日志文件
-*.log
-
-# 忽略二进制文件
+# Ignore binary files
 *.exe
 *.bin
 *.dll
-*.so
-*.dylib
+*.zip
+*.tar
+*.gz
+*.7z
+*.rar
+*.iso
 
-# 忽略 macOS 系统文件
+# Ignore system files
 .DS_Store
-
-# 忽略 Windows 系统文件
 Thumbs.db
 
-# 忽略 IDE 配置文件（如 VSCode）
+# Ignore IDE/editor folders
 .vscode/
 .idea/
