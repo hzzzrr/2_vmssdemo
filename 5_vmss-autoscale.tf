@@ -19,6 +19,7 @@ resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
   admin_ssh_key {
     username   = "zhouruihan"
     public_key = file("C:/Users/zhouruihan/.ssh/id_rsa.pub")
+    #to-do~
   }
 
   os_disk {
@@ -61,8 +62,10 @@ resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
     enabled = true
     grace_period = "PT10M"
   }
-  #scale_in_policy = "OldestVM"
- 
+  termination_notification {
+    enabled = true
+    timeout = "PT10M"  # 10分钟通知期（ISO 8601 持续时间格式）
+  }
   scale_in {
     rule = "OldestVM"
     force_deletion_enabled = true
