@@ -52,7 +52,7 @@ resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
 
   user_data = base64encode(local.vmss_user_data)
 
-  zones = ["1", "2"]
+  zones = ["2", "3"]
   zone_balance = true
 
   # enable automatic instance repair after 10 minutes, using http probe /health
@@ -62,13 +62,19 @@ resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
     enabled = true
     grace_period = "PT10M"
   }
+
   termination_notification {
     enabled = true
-    timeout = "PT10M"  # 10分钟通知期（ISO 8601 持续时间格式）
+    timeout = "PT10M"  
+    # 10min notification before instance is delete
+    #v2.0
   }
+
   scale_in {
     rule = "OldestVM"
-    force_deletion_enabled = true
+    force_deletion_enabled = false
+    #Set to true if force delete instances without waiting for graceful shutdown
+    #v2.0
   }
 }
 
@@ -130,7 +136,7 @@ resource "azurerm_monitor_autoscale_setting" "vmss_auto_scale" {
         direction = "Decrease"
         type      = "ChangeCount"
         value     = "1"
-        cooldown  = "PT10M"#v1.0
+        cooldown  = "PT10M"    
       }
     }
   }

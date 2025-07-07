@@ -116,6 +116,100 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  
+  - path: /usr/local/bin/termination-listener.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+        #!/bin/bash
+        echo "[$(date)] 启动终止事件监听器" | logger -t termination-listener
+        
+        # 初始化日志函数
+        log_info() {
+          echo "[$(date)] $1" | logger -t termination-listener
+        }
+        
+        log_debug() {
+          echo "[$(date)] $1" | logger -t termination-listener-debug
+        }
+        
+        while true; do
+          # 检查健康标志是否存在（防止意外删除）
+          if [[ ! -f /tmp/health_flag ]]; then
+            log_info "警告：健康标志文件不存在，正在创建..."
+            touch /tmp/health_flag
+          fi
+          
+          # 查询 IMDS 终止事件
+          EVENT=$(curl -H Metadata:true -s "http://169.254.169.254/metadata/scheduledevents?api-version=2020-07-01")
+          
+          # 先进行基本检查，确保EVENT不为空且格式正确
+          if [[ -z "$EVENT" ]]; then
+            log_debug "无法获取事件数据，将在5秒后重试"
+            sleep 5
+            continue
+          fi
+          
+          # 检查是否有事件
+          HAS_EVENTS=false
+          if echo "$EVENT" | jq -e '.Events' > /dev/null 2>&1; then
+            # 检查事件是否不为空数组
+            if [[ $(echo "$EVENT" | jq -r '.Events | length') -gt 0 ]]; then
+              # 检查是否有终止或抢占事件
+              if echo "$EVENT" | jq -e '.Events[] | select(.EventType=="Terminate" or .EventType=="Preempt")' > /dev/null 2>&1; then
+                HAS_EVENTS=true
+                # 记录详细的事件信息
+                EVENT_DETAILS=$(echo "$EVENT" | jq -c '.Events[] | select(.EventType=="Terminate" or .EventType=="Preempt")')
+                log_info "检测到终止事件: $EVENT_DETAILS"
+              else
+                log_debug "有事件，但不是终止或抢占事件"
+              fi
+            else
+              log_debug "事件列表为空"
+            fi
+          else
+            log_debug "事件数据格式不正确: $EVENT"
+          fi
+          
+          if [[ "$HAS_EVENTS" == "true" ]]; then
+            # 只有确认是终止事件时才移除健康标志
+            if [[ -f /tmp/health_flag ]]; then
+              rm -f /tmp/health_flag
+              log_info "已删除健康标志，负载均衡器将停止路由流量"
+            else
+              log_info "健康标志已经不存在"
+            fi
+            log_info "将等待最多10分钟处理剩余请求"
+            # 记录到特殊日志，方便确认这是真实终止事件
+            echo "[$(date)] 实例将被终止 - 事件详情: $EVENT_DETAILS" | logger -t termination-confirmed
+            
+            # 保持脚本运行，但停止检查
+            sleep infinity
+            break
+          else
+            # 只输出简短日志，避免过多日志
+            log_debug "未检测到终止事件，继续监听..."
+          fi
+          
+          # 每5秒检查一次
+          sleep 5
+        done
+  
+  - path: /etc/systemd/system/termination-listener.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Azure VMSS Termination Event Listener
+      After=network.target
+      
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/termination-listener.sh
+      Restart=always
+      
+      [Install]
+      WantedBy=multi-user.target
 
 runcmd:
   - |
@@ -130,3 +224,5 @@ runcmd:
     systemctl enable graceful-shutdown.service
     systemctl enable webapp
     systemctl start webapp
+    systemctl enable termination-listener.service
+    systemctl start termination-listener.service
