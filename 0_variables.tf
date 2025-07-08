@@ -9,5 +9,5 @@ variable "primary_region" {
 #input sub id for prod
 variable "subscription-id" {
   type = string
-  default = "ac48f6d7-7d46-45dc-90d5-c43d85721e6a"  #订阅ID
+  default = "xxxxx"  #订阅ID - todo
 }
