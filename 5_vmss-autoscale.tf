@@ -150,7 +150,7 @@ resource "azurerm_monitor_autoscale_setting" "vmss_auto_scale" {
     email {
       # send_to_subscription_administrator    = true
       # send_to_subscription_co_administrator = true
-      custom_emails                         = ["zhouruihan@microsoft.com"]
+      custom_emails                         = ["xxx@.com"] #to-do
     }
   }
 }
